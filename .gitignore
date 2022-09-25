@@ -1,0 +1,9 @@
+.DS_Store
+.classpath
+.java-version
+.project
+.settings/
+.vscode/
+airbyte-workers
+target/
+src/main/scripts/*.java
