@@ -9,15 +9,13 @@ import java.security.ProtectionDomain;
 import org.objectweb.asm.*;
 import org.objectweb.asm.util.*;
 
-import io.airbyte.workers.general.DefaultReplicationWorker;
-
 public class Premain {
     static boolean printClassByteCode = false;
     public static void premain(String agentArgs, Instrumentation inst) throws Exception {
         inst.addTransformer(new ClassFileTransformer() {
             public byte[] transform(ClassLoader l, String name, Class c, ProtectionDomain d, byte[] b) throws IllegalClassFormatException {
                 // The class to be injected
-                if(name.equals(Type.getType(DefaultReplicationWorker.class).getInternalName())) {
+                if(name.equals(Constants.DefaultReplicationWorkerInternalName)) {
                     // Read the class bytecode
                     ClassReader cr = new ClassReader(b);
                     // Write the injected class bytecode
@@ -31,13 +29,24 @@ public class Premain {
                     } else {
                         // Create the class adapter that injects code
                         cv = new AirbyteDefaultReplicationWorkerAdapter(cw);
-
                     }
                     // Run the injection
-                    //cr.accept(cv, 0);
-                    cr.accept(cv, 0);
+                    try {
+                        // java.lang.IllegalArgumentException: LocalVariablesSorter only accepts expanded frames (see ClassReader.EXPAND_FRAMES)
+                        cr.accept(cv, ClassReader.EXPAND_FRAMES);
+                    } catch (Exception e) {
+                        System.out.println("ERROR... : " + e.getMessage());
+                        e.printStackTrace();
+                        throw e;
+                    }
                     // Return the injected code to replace the original class
-                    return cw.toByteArray();
+                    byte[] bw = cw.toByteArray();
+                    System.out.println("Initial byte length: " + b.length);
+                    System.out.println("Modified byte length: " + bw.length);
+                    if (b.length == bw.length) {
+                        System.out.println("Weird, byte array of same size");
+                    }
+                    return bw;
                 }
                 return b;
         } });
