@@ -14,6 +14,8 @@
   <properties>
     <asm.version>9.3</asm.version>
     <airbyte.version>0.40.4</airbyte.version>
+    <jackson.version>2.13.0</jackson.version>
+    <slf4j.version>1.7.30</slf4j.version>
   </properties>
 
   <repositories>
@@ -40,12 +42,53 @@
         <artifactId>asm-commons</artifactId>
         <version>${asm.version}</version>
       </dependency>
-  
+
+      <!-- dependencies to prepare and send Data Observations -->
+      <!-- currently the version of jackson supported is 2.10+ which should be OK for the 2.13+ -->
+      <dependency>
+        <groupId>io.kensu.dam</groupId>
+        <artifactId>kensu-dam-java-client-jackson-2-10-0</artifactId>
+        <version>1.1.1-SNAPSHOT</version>
+      </dependency>
+
       <!-- Dependencies related to the project under ASMification -->
+      <dependency>
+        <groupId>io.airbyte</groupId>
+        <artifactId>airbyte-commons</artifactId>
+        <version>${airbyte.version}</version>
+      </dependency>
       <dependency>
         <groupId>io.airbyte</groupId>
         <artifactId>airbyte-workers</artifactId>
         <version>${airbyte.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.airbyte.airbyte-protocol</groupId>
+        <artifactId>protocol-models</artifactId>
+        <version>${airbyte.version}</version>
+      </dependency>
+        <dependency>
+        <groupId>io.airbyte.airbyte-config</groupId>
+        <artifactId>config-models</artifactId>
+        <version>${airbyte.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.fasterxml.jackson.core</groupId>
+        <artifactId>jackson-core</artifactId>
+        <version>${jackson.version}</version>
+        <scope>provided</scope>
+      </dependency>
+      <dependency>
+        <groupId>com.fasterxml.jackson.core</groupId>
+        <artifactId>jackson-databind</artifactId>
+        <version>${jackson.version}</version>
+        <scope>provided</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.slf4j</groupId>
+        <artifactId>slf4j-api</artifactId>
+        <version>${slf4j.version}</version>
+        <scope>provided</scope>
       </dependency>
     </dependencies>
   </dependencyManagement>

@@ -37,10 +37,44 @@
       <artifactId>asm-commons</artifactId>
     </dependency>
     <dependency>
+      <groupId>io.kensu.dam</groupId>
+      <artifactId>kensu-dam-java-client-jackson-2-10-0</artifactId>
+    </dependency>
+    <dependency>
       <groupId>io.airbyte</groupId>
       <artifactId>airbyte-workers</artifactId>
     </dependency>
-  </dependencies>
+    <dependency>
+      <groupId>io.airbyte</groupId>
+      <artifactId>airbyte-commons</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.airbyte.airbyte-config</groupId>
+      <artifactId>config-models</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.airbyte.airbyte-protocol</groupId>
+      <artifactId>protocol-models</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-core</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+      <scope>provided</scope>
+    </dependency>
+</dependencies>
 
   <build>
     <finalName>${project.artifactId}</finalName>
