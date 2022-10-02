@@ -24,6 +24,22 @@
   </properties>
 
   <dependencies>
+    <!-- kensu deps -->
+    <dependency>
+      <groupId>io.kensu.dam</groupId>
+      <artifactId>kensu-dam-java-client-jackson-2-10-0</artifactId>
+      <exclusions>
+        <exclusion>
+          <groupId>com.fasterxml.jackson.datatype</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>com.fasterxml.jackson.core</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <!-- ASM Agent deps -->
     <dependency>
       <groupId>org.ow2.asm</groupId>
       <artifactId>asm</artifactId>
@@ -36,13 +52,11 @@
       <groupId>org.ow2.asm</groupId>
       <artifactId>asm-commons</artifactId>
     </dependency>
-    <dependency>
-      <groupId>io.kensu.dam</groupId>
-      <artifactId>kensu-dam-java-client-jackson-2-10-0</artifactId>
-    </dependency>
+    <!-- airbyte deps => scope provided -->
     <dependency>
       <groupId>io.airbyte</groupId>
       <artifactId>airbyte-workers</artifactId>
+      <scope>provided</scope>
     </dependency>
     <dependency>
       <groupId>io.airbyte</groupId>
@@ -59,6 +73,7 @@
       <artifactId>protocol-models</artifactId>
       <scope>provided</scope>
     </dependency>
+    <!-- added as the agent uses these transitive deps of airbyte -->
     <dependency>
       <groupId>com.fasterxml.jackson.core</groupId>
       <artifactId>jackson-core</artifactId>
@@ -108,6 +123,49 @@
           </execution>
         </executions>
       </plugin>
+      <plugin> 
+        <groupId>org.apache.maven.plugins</groupId>    
+        <artifactId>maven-shade-plugin</artifactId> 
+        <executions> 
+            <execution> 
+                <phase>package</phase> 
+                <goals> 
+                    <goal>shade</goal> 
+                </goals> 
+                <configuration>
+                  <relocations>
+                    <relocation>
+                      <pattern></pattern>
+                      <shadedPattern>shaded.</shadedPattern>
+                      <excludes>
+                          <exclude>META-INF/**.*</exclude>
+                      </excludes>
+                      <includes>
+                        <include>javassist.**</include>
+                        <!-- <include>com.fasterxml.**</include> -->
+                        <include>com.fasterxml.jackson.datatype.threetenbp.**</include>
+                        <include>com.migcomponents.**</include>
+                        <include>com.sun.**</include>
+                        <include>io.swagger.**</include>
+                        <include>javax.annotation.**</include>
+                        <include>javax.inject.**</include>
+                        <include>javax.validation.**</include>
+                        <include>javax.ws.**</include>
+                        <include>jersey.repackaged.**</include>
+                        <include>org.aopalliance.**</include>
+                        <include>org.apache.**</include>
+                        <include>org.codehaus.**</include>
+                        <include>org.glassfish.**</include>
+                        <include>org.jvnet.**</include>
+                        <include>org.objectweb.**</include>
+                        <include>org.threeten.**</include>
+                      </includes>
+                    </relocation>                  
+                </relocations>
+              </configuration>
+            </execution> 
+        </executions> 
+      </plugin> 
     </plugins>
   </build>
 

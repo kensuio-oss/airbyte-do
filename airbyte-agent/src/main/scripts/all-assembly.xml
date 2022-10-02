@@ -10,7 +10,7 @@
   <dependencySets>
     <dependencySet>
       <unpack>true</unpack>
-      <useTransitiveDependencies>false</useTransitiveDependencies>
+      <useTransitiveDependencies>true</useTransitiveDependencies>
     </dependencySet>
   </dependencySets>
 
