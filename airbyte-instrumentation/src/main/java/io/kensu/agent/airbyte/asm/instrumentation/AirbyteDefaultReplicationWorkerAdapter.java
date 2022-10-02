@@ -13,7 +13,7 @@ import org.objectweb.asm.commons.Method;
 public class AirbyteDefaultReplicationWorkerAdapter extends ClassVisitor {
 
     public String staticLambdaFunctionName;
-
+    
     /**
      * getReplicationRunnable returns a Runnable created as a `lambda`: `() -> {}`
      * that implements the `run` method of Runnable
@@ -36,13 +36,10 @@ public class AirbyteDefaultReplicationWorkerAdapter extends ClassVisitor {
             String[] exceptions) {
         MethodVisitor mv = cv.visitMethod(access, name, descriptor, signature, exceptions);
         if (name.equals("run") && descriptor.endsWith("ReplicationOutput;")) {
-            System.out.println("Got run!");
             mv = new MethodVisitors.MethodVisitorRun(descriptor, mv);
         } else if  (name.equals("getReplicationRunnable")) {
-            System.out.println("Got getReplicationRunnable!");
             mv = new MethodVisitors.MethodVisitorReturnRunnable(mv, this);
         } else if (name.equals(this.staticLambdaFunctionName)) {
-            System.out.println("Got the lambda: " + this.staticLambdaFunctionName + "!");
             MethodVisitors.MethodVisitorRunnableRunLambda mvr = new MethodVisitors.MethodVisitorRunnableRunLambda(descriptor, mv);
             LocalVariablesSorter lvs = new LocalVariablesSorter(access, descriptor, mvr);
             mvr.lvs = lvs;
@@ -109,14 +106,12 @@ public class AirbyteDefaultReplicationWorkerAdapter extends ClassVisitor {
                     if (atDesc.equals(Constants.StandardSyncInputDescriptor)) {
                         // Retain source index on the stack for future usage
                         this.argOfTypeStandardSyncInputIndex = index;
-                        System.out.println("(By type) Index of the StandardSyncInput is: " + this.argOfTypeStandardSyncInputIndex);
                     }
                     index++;
                 }
             }
 
             public void addCode() {
-                System.out.println("add code run");
                 // Get the agent
                 generateGetAgentCallInDefaultReplicationWorker(mv);
                 // visit StandardSyncInput
@@ -134,7 +129,6 @@ public class AirbyteDefaultReplicationWorkerAdapter extends ClassVisitor {
 
             @Override
             public void visitMaxs(int maxStack, int maxLocals) {
-                System.out.println("visitMaxs");
                 // we don't compute them, because we let the class writer do it
                 mv.visitMaxs(maxStack, maxLocals);
             }
@@ -187,7 +181,6 @@ public class AirbyteDefaultReplicationWorkerAdapter extends ClassVisitor {
 
             public MethodVisitorRunnableRunLambda(String desc, MethodVisitor mv) {
                 super(ASM9, mv);
-                System.out.println("Create MethodVisitorRunnableRunLambda");
                 Method thisMethod = new Method("whocares_1", desc);
                 int index = 0;
                 for (Type at : thisMethod.getArgumentTypes()) {
@@ -291,7 +284,6 @@ public class AirbyteDefaultReplicationWorkerAdapter extends ClassVisitor {
 
             @Override
             public void visitMaxs(int maxStack, int maxLocals) {
-                System.out.println("visitMaxs");
                 // we don't compute them, because we let the class writer do it
                 mv.visitMaxs(maxStack, maxLocals);
             }

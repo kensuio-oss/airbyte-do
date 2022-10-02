@@ -2,11 +2,14 @@ package io.kensu.agent.airbyte;
 
 import java.util.Iterator;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
@@ -16,12 +19,15 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
+import java.nio.file.Path;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
+import io.airbyte.commons.text.Names;
 import io.airbyte.config.StandardSyncInput;
 import io.airbyte.protocol.models.AirbyteMessage;
 import io.airbyte.protocol.models.AirbyteRecordMessage;
+import io.airbyte.protocol.models.ConfiguredAirbyteStream;
 import io.airbyte.workers.internal.AirbyteSource;
 import io.airbyte.workers.internal.DefaultAirbyteSource;
 import io.airbyte.workers.internal.AirbyteDestination;
@@ -36,6 +42,7 @@ import io.airbyte.workers.WorkerMetricReporter;
 import io.kensu.dam.*;
 import io.kensu.dam.model.*;
 import io.kensu.dam.model.Process;
+import io.kensu.dam.util.Compact;
 
 public class KensuAgent {
     private static final Logger LOGGER = LoggerFactory.getLogger(KensuAgent.class);
@@ -151,6 +158,7 @@ public class KensuAgent {
         if (sourceImage != null && destinationImage != null) {
             // We make the choice that each sync is a process, not the Airbyte Server
             // A process is currently representing the link between a Source type (docker) and destination type (docker)
+            // TODO => should it be coming from the syncInput.catalog.streams?
             this.process = new Process().pk(new ProcessPK().qualifiedName("Airbyte:" + sourceImage + "->"+ destinationImage));
             this.project = new Project().pk(new ProjectPK().name("Provided By Airbyte?")); //TODO
             this.launchingUser = new User().pk(new UserPK().name("Provided by Airbyte?")); //TODO
@@ -158,11 +166,13 @@ public class KensuAgent {
             this.maintainerUser = new User().pk(new UserPK().name("Provided by Airbyte?")); //TODO
             this.codeVersion = new CodeVersion().pk(new CodeVersionPK().version("Provided by Airbyte?")
                                                                         .codebaseRef(new CodeBaseRef().byPK(this.codeBase.getPk())))
-                                                .maintainersRefs(java.util.List.of(new UserRef().byPK(this.maintainerUser.getPk())));
-            this.processRun = new ProcessRun().projectsRefs(java.util.List.of(new ProjectRef().byPK(this.project.getPk()))) 
+                                                .maintainersRefs(new ArrayList<>(List.of(new UserRef().byPK(this.maintainerUser.getPk()))));
+            this.processRun = new ProcessRun().projectsRefs(new ArrayList<>(List.of(new ProjectRef().byPK(this.project.getPk())))) 
                                                 .launchedByUserRef(new UserRef().byPK(launchingUser.getPk()))
                                                 .executedCodeVersionRef(new CodeVersionRef().byPK(this.codeVersion.getPk()))
-                                                .environment("Provided by Airbyte?"); //TODO      
+                                                .environment("Provided by Airbyte?") //TODO
+                                                .pk(new ProcessRunPK().qualifiedName(process.getPk().getQualifiedName())
+                                                                        .processRef(new ProcessRef().byPK(process.getPk()))); 
             // sending observations   
             try {
                 observationsAPI.reportProcess(process);
@@ -211,79 +221,115 @@ public class KensuAgent {
         }
     }
 
+    private Map.Entry<Predicate<String>, Consumer<StandardSyncInput>> createProcessEntry(String matchStart, Consumer<StandardSyncInput> process) {
+        return Map.<Predicate<String>, Consumer<StandardSyncInput>>entry((image) -> image.startsWith(matchStart), process);
+    }
+
+    // TODO could be filled reading the specs YAML
+    public Map<Predicate<String>, Consumer<StandardSyncInput>> sources = Map.ofEntries(
+        createProcessEntry("airbyte/source-file", (syncInput) -> this.processAirbyteSourceFile(syncInput))
+    );
+    public Map<Predicate, Consumer<StandardSyncInput>> destinations = Map.ofEntries(
+        createProcessEntry("airbyte/destination-csv", (syncInput) -> this.processAirbyteDestinationCsv(syncInput))
+    );
+
     public void init(StandardSyncInput syncInput) {
-        // e.g., "airbyte/source-file:0.2.20"
         if (sourceImage == null) {
             LOGGER.error("Cannot proceed as source image name is unknown");
             return;
-        } else if (sourceImage.startsWith("airbyte/source-file")) { // source: https CSV
-            // configured source for the sync
-            JsonNode sourceConfiguration = syncInput.getSourceConfiguration();
-            // "https://www.donneesquebec.ca/recherche/fr/dataset/857d007a-f195-434b-bc00-7012a6244a90/resource/16f55019-f05d-4375-a064-b75bce60543d/download/pf-mun-2019-2019.csv"
-            String url = sourceConfiguration.get("url").textValue();
-            // "csv"
-            String format = sourceConfiguration.get("format").textValue();
-            // "HTTPS"
-            String providerStorage = sourceConfiguration.get("provider").get("storage").textValue();
-            // "donneesquebec"
-            String datasetName = sourceConfiguration.get("dataset_name").textValue();
-
-            sourceDS = new DataSource()
-                    .name(datasetName)
-                    .format(format)
-                    .pk(new DataSourcePK()
-                            .location(url)
-                            .physicalLocationRef(UNKNOWN_PL_REF));
-
-            // validator => get schema => configured
-            if (recordSchemaValidatorStreams != null) {
-                SchemaPK pk = new SchemaPK();
-                JsonNode sourceJsonSchema = recordSchemaValidatorStreams.get(datasetName);
-                // properties: {"field1": {"type": ["string", "null"]}, ...}
-                // properties.fields: Iterator<Map.Entry<String,JsonNode>>
-                Iterator<Map.Entry<String, JsonNode>> itFields = sourceJsonSchema.get("properties").fields();
-                while (itFields.hasNext()) {
-                    Map.Entry<String, JsonNode> field = itFields.next();
-                    String fieldName = field.getKey();
-                    String fieldType = field.getValue().get("type").elements().next().textValue();
-                    // TODO better typing => we get `number` and `string`
-                    Boolean fieldNullable = true; // TODO... no idea?
-                    pk = pk.addFieldsItem(new FieldDef().name(fieldName).fieldType(fieldType).nullable(fieldNullable));
-                }
-                sourceSC = new Schema().name(datasetName).pk(pk);
+        } else {
+            Optional<Consumer<StandardSyncInput>> sourceProcessor = sources.entrySet().stream().filter(e->e.getKey().test(sourceImage))
+                                                                                                    .map(e->e.getValue())
+                                                                                                    .findFirst();
+            if (sourceProcessor.isPresent()) {
+                sourceProcessor.get().accept(syncInput);
             } else {
-                LOGGER.warn("No schema validator available, so no schema available for source: " + source);
+                LOGGER.error("Cannot handle source image: " + sourceImage);
             }
-
         }
-        // e.g., "airbyte/destination-csv:0.2.10"
         if (destinationImage == null ) {
             LOGGER.error("Cannot proceed as destination image name is unknown");
             return;
-        } else if (destinationImage.startsWith("airbyte/destination-csv")) { // destination: local CSV
-            // configured destination for the sync
-            JsonNode destinationConfiguration = syncInput.getDestinationConfiguration();
-            //"/tmp"
-            String destinationPath = destinationConfiguration.get("destination_path").textValue();
-            destinationDS = new DataSource()
-                                .name("TODO?") //TODO
-                                .format("csv")
-                                .pk(new DataSourcePK()
-                                    .location(destinationPath) //TODO => destination_path this is the folder, not the final file
-                                    .physicalLocationRef(UNKNOWN_PL_REF));
-            destinationSC = new Schema().name(destinationDS.getName()).pk(new SchemaPK());
-        }
-
-        // INFO => the destination of the destination is not known -> so we copy the source
-        // sending sourceDS, sourceSC, destinationDS
-        try {
-            this.observationsAPI.reportDataSource(sourceDS);
-            this.observationsAPI.reportSchema(sourceSC);
-            this.observationsAPI.reportDataSource(destinationDS);            
-        } catch (ApiException e) {
-            LOGGER.error("Cannot report datasource and schema", e);
+        } else {
+            Optional<Consumer<StandardSyncInput>> destinationProcessor = destinations.entrySet().stream().filter(e->e.getKey().test(destinationImage))
+                                                                                                        .map(e->e.getValue())
+                                                                                                        .findFirst();
+            if (destinationProcessor.isPresent()) {
+                destinationProcessor.get().accept(syncInput);
+            } else {
+                LOGGER.error("Cannot handle destination image: " + destinationImage);
+            }
         }
     }
+
+    // SOURCE PROCESSORS
+    private void processAirbyteSourceFile(StandardSyncInput syncInput) {
+        // configured source for the sync
+        JsonNode sourceConfiguration = syncInput.getSourceConfiguration();
+        // "https://www.donneesquebec.ca/recherche/fr/dataset/857d007a-f195-434b-bc00-7012a6244a90/resource/16f55019-f05d-4375-a064-b75bce60543d/download/pf-mun-2019-2019.csv"
+        String url = sourceConfiguration.get("url").textValue();
+        // "csv"
+        String format = sourceConfiguration.get("format").textValue();
+        // "HTTPS"
+        String providerStorage = sourceConfiguration.get("provider").get("storage").textValue();
+        // "donneesquebec"
+        String datasetName = sourceConfiguration.get("dataset_name").textValue();
+
+        sourceDS = new DataSource()
+                .name(datasetName)
+                .format(format)
+                .pk(new DataSourcePK()
+                        .location(url)
+                        .physicalLocationRef(UNKNOWN_PL_REF));
+
+        // validator => get schema => configured
+        if (recordSchemaValidatorStreams != null) {
+            SchemaPK pk = new SchemaPK().dataSourceRef(new DataSourceRef().byPK(this.sourceDS.getPk()));
+            JsonNode sourceJsonSchema = recordSchemaValidatorStreams.get(datasetName);
+            // properties: {"field1": {"type": ["string", "null"]}, ...}
+            // properties.fields: Iterator<Map.Entry<String,JsonNode>>
+            Iterator<Map.Entry<String, JsonNode>> itFields = sourceJsonSchema.get("properties").fields();
+            while (itFields.hasNext()) {
+                Map.Entry<String, JsonNode> field = itFields.next();
+                String fieldName = field.getKey();
+                String fieldType = field.getValue().get("type").elements().next().textValue();
+                // TODO better typing => we get `number` and `string`
+                Boolean fieldNullable = true; // TODO... no idea?
+                pk = pk.addFieldsItem(new FieldDef().name(fieldName).fieldType(fieldType).nullable(fieldNullable));
+            }
+            sourceSC = new Schema().name(datasetName).pk(pk);
+        } else {
+            LOGGER.warn("No schema validator available, so no schema available for source: " + source);
+        }
+    }
+
+    // DESTINATION PROCESSORS
+    private void processAirbyteDestinationCsv(StandardSyncInput syncInput) {
+        // configured destination for the sync
+        JsonNode destinationConfiguration = syncInput.getDestinationConfiguration();
+        //"/tmp"
+        String destinationPath = destinationConfiguration.get("destination_path").textValue();
+        // FIXME => always only 1?
+        ConfiguredAirbyteStream stream = syncInput.getCatalog().getStreams().get(0);
+        String streamName = stream.getStream().getName();
+        // shame... copied from the Destination's code. This could be available somewhere else, or differently 
+        String fileName = Names.toAlphanumericAndUnderscore("_airbyte_raw_" + streamName);
+        String rootPathForDestinationCsv = System.getenv("LOCAL_ROOT");
+        if (rootPathForDestinationCsv == null) {
+            // default...
+            rootPathForDestinationCsv = "/tmp/airbyte_local";
+        }
+        String fileLocation = rootPathForDestinationCsv + "/" + destinationPath + "/" + fileName;
+        destinationDS = new DataSource()
+                            .name(fileName)
+                            .format("csv")
+                            .pk(new DataSourcePK()
+                                .location(fileLocation) 
+                                .physicalLocationRef(UNKNOWN_PL_REF));
+        destinationSC = new Schema().name(destinationDS.getName()).pk(new SchemaPK().dataSourceRef(new DataSourceRef().byPK(this.destinationDS.getPk())));
+    }
+
+    // Message HANDLERS (read, map, write)
 
     public void handleMessageMapped(AirbyteMessage message) {
         if (destinationSC != null) {
@@ -304,7 +350,7 @@ public class KensuAgent {
                     } else if (fieldValue.isTextual()) {
                         fieldType = "string";
                     } else {
-                        LOGGER.warn("Not handled mapped message field type: " + fieldValue.getNodeType());
+                        LOGGER.debug("Not handled mapped message field type: " + fieldValue.getNodeType());
                     }
                     if (fieldType != null) {
                         destinationSC.getPk().addFieldsItem(new FieldDef().name(fieldName).fieldType(fieldType).nullable(true));
@@ -312,34 +358,6 @@ public class KensuAgent {
                 }
                 // TODO need to add "unknown" type for fields which for all message have only null values! 
                 //      As it won't be added in the schema then
-            }
-            Set<String> sourceFieldNames = sourceSC.getPk().getFields().stream().map(e -> e.getName()).collect(Collectors.toSet());
-            SchemaRef sourceSCRef = new SchemaRef().byPK(this.sourceSC.getPk());
-            SchemaRef destinationSCRef = new SchemaRef().byPK(this.destinationSC.getPk());
-            // INFO: Mapper is a black box... we can give it some extra power to also log its mapping, and retrieve it here, or in a span
-            // So this best effort only link fields of same names
-            Map<String, List<String>> bestEffortMapping = new HashMap<>();
-            for (FieldDef fd : destinationSC.getPk().getFields()) {
-                if (sourceFieldNames.contains(fd.getName())) {
-                    bestEffortMapping.put(fd.getName(), List.of(fd.getName()));
-                }
-            }
-            if (bestEffortMapping.isEmpty()) { bestEffortMapping.put("fake", List.of("fake")); } // ensure there is something... 
-            lineage = new ProcessLineage().name("Skip")
-                                            .pk(new ProcessLineagePK()
-                                                    .dataFlow(List.of(new SchemaLineageDependencyDef()
-                                                                            .fromSchemaRef(sourceSCRef)
-                                                                            .toSchemaRef(destinationSCRef)
-                                                                            .columnDataDependencies(bestEffortMapping))));
-            lineageRun = new LineageRun().pk(new LineageRunPK()
-                                                .processRunRef(new ProcessRunRef().byPK(this.processRun.getPk()))
-                                                .lineageRef(new ProcessLineageRef().byPK(this.lineage.getPk())));
-            // send lineage and run
-            try {
-                this.observationsAPI.reportProcessLineage(lineage);
-                this.observationsAPI.reportLineageRun(lineageRun);
-            } catch (ApiException e) {
-                LOGGER.error("Cannot report lineage, lineageRun", e);
             }
         } else {
             LOGGER.warn("Process mapped message skipped as Destination schema is null, see logs from `init`");
@@ -362,7 +380,7 @@ public class KensuAgent {
                 } else if (fieldValue.isTextual()) {
                     fieldType = "string";
                 } else {
-                    LOGGER.warn("Not handled read message field type to accumulate metrics: " + fieldValue.getNodeType());
+                    LOGGER.debug("Not handled read message field type to accumulate metrics: " + fieldValue.getNodeType());
                 }
                 if (fieldType != null) {
                     updateMetrics(sourceMetrics, fieldName, fieldType, fieldValue);
@@ -388,7 +406,7 @@ public class KensuAgent {
             } else if (fieldValue.isTextual()) {
                 fieldType = "string";
             } else {
-                LOGGER.warn("Not handled copied message field type to accumulate metrics: " + fieldValue.getNodeType());
+                LOGGER.debug("Not handled copied message field type to accumulate metrics: " + fieldValue.getNodeType());
             }
             if (fieldType != null) {
                 updateMetrics(destinationMetrics, fieldName, fieldType, fieldValue);
@@ -409,12 +427,54 @@ public class KensuAgent {
             metrics.compute(fieldName+".count", (k, v) -> (v==null)?1:v+1);
             // total length
             metrics.compute(fieldName+".sum", (k, v) -> (v==null)?1:v+value.textValue().length());
-            // distinct?
-            // TODO
+            // distinct 
+            // TODO use CMS?
         }
     }
 
     public void finishCopy() {
+        // sending sourceDS, sourceSC, destinationDS
+        try {
+            this.observationsAPI.reportDataSource(sourceDS);
+            this.observationsAPI.reportSchema(sourceSC);
+            this.observationsAPI.reportDataSource(destinationDS);
+            this.observationsAPI.reportSchema(destinationSC);
+        } catch (ApiException e) {
+            LOGGER.error("Cannot report datasource and schema", e);
+        }
+
+        // compute final lineage using final schemas
+        Set<String> sourceFieldNames = sourceSC.getPk().getFields().stream().map(e -> e.getName()).collect(Collectors.toSet());
+        SchemaRef sourceSCRef = new SchemaRef().byPK(this.sourceSC.getPk());
+        SchemaRef destinationSCRef = new SchemaRef().byPK(this.destinationSC.getPk());
+        // INFO: Mapper is a black box... we can give it some extra power to also log its mapping, and retrieve it here, or in a span
+        // So this best effort only link fields of same names
+        Map<String, List<String>> bestEffortMapping = new HashMap<>();
+        for (FieldDef fd : destinationSC.getPk().getFields()) {
+            if (sourceFieldNames.contains(fd.getName())) {
+                bestEffortMapping.put(fd.getName(), new ArrayList<>(List.of(fd.getName())));
+            }
+        }
+        if (bestEffortMapping.isEmpty()) { bestEffortMapping.put("fake", new ArrayList<>(List.of("fake"))); } // ensure there is something... 
+        lineage = new ProcessLineage().name("Skip")
+                                        .pk(new ProcessLineagePK()
+                                                .processRef(new ProcessRef().byPK(this.process.getPk()))
+                                                .dataFlow(new ArrayList<>(List.of(new SchemaLineageDependencyDef()
+                                                                                    .fromSchemaRef(sourceSCRef)
+                                                                                    .toSchemaRef(destinationSCRef)
+                                                                                    .columnDataDependencies(bestEffortMapping)))));
+        lineageRun = new LineageRun().pk(new LineageRunPK()
+                                            .timestamp(System.currentTimeMillis())
+                                            .processRunRef(new ProcessRunRef().byPK(this.processRun.getPk()))
+                                            .lineageRef(new ProcessLineageRef().byPK(this.lineage.getPk())));
+        // send lineage and run
+        try {
+            this.observationsAPI.reportProcessLineage(lineage);
+            this.observationsAPI.reportLineageRun(lineageRun);
+        } catch (ApiException e) {
+            LOGGER.error("Cannot report lineage, lineageRun", e);
+        }
+
         // Compile the stats and send
         DataStats sourceDSMetrics = new DataStats().pk(new DataStatsPK().schemaRef(new SchemaRef().byPK(sourceSC.getPk()))
                                                                         .lineageRunRef(new LineageRunRef().byPK(lineageRun.getPk()))
@@ -436,7 +496,8 @@ public class KensuAgent {
             LOGGER.error("Cannot report datastats", e);
         }
 
-        // notify agent is done => clear cache in Factory
+        // notify agent is done => clear cache in Factory 
+        //   => should be handled by Factory, registering itself to act on "termination"
         KensuAgentFactory.terminate(this);
     }
 
