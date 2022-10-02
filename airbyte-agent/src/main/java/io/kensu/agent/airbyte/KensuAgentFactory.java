@@ -15,13 +15,12 @@ import io.kensu.dam.*;
 public class KensuAgentFactory {
 
     private static KensuAgentFactory INSTANCE = new KensuAgentFactory();
-    // TODO FIXME clear "cache"
     private ConcurrentHashMap<AgentKey, KensuAgent> agents = new ConcurrentHashMap<>();
 
     public KensuAgentFactory() {
-        // TODO load config
     }
 
+    // Static methods
     public static KensuAgentFactory getInstance() {
         return INSTANCE;
     }
@@ -38,6 +37,13 @@ public class KensuAgentFactory {
         return getInstance().getOrCreateAgent(source, destination, mapper, messageTracker, recordSchemaValidator, metricReporter);
     }
   
+    public static void terminate(KensuAgent kensuAgent) {
+        AgentKey key = new AgentKey(kensuAgent.source, kensuAgent.destination, kensuAgent.mapper, kensuAgent.messageTracker, 
+                                    kensuAgent.recordSchemaValidator, kensuAgent.metricReporter);
+        getInstance().terminateAgent(key);
+    }
+
+    // Object methods
     public KensuAgent createAgent(AirbyteSource source, AirbyteDestination destination, AirbyteMapper mapper,
                                     MessageTracker messageTracker, RecordSchemaValidator recordSchemaValidator,
                                     WorkerMetricReporter metricReporter) {
@@ -51,6 +57,11 @@ public class KensuAgentFactory {
         return agents.computeIfAbsent(key, k -> createAgent(k.source, k.destination, k.mapper, k.messageTracker, k.recordSchemaValidator, k.metricReporter));
     }
 
+    private void terminateAgent(AgentKey key) {
+        this.agents.remove(key);
+    }
+
+    // Internal Key to uniquely identify an agent in the cache
     public static class AgentKey {
         public AirbyteSource source;
         public AirbyteDestination destination;

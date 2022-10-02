@@ -2,16 +2,18 @@ package io.kensu.agent.airbyte;
 
 import java.util.Iterator;
 import java.util.List;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
 
@@ -38,6 +40,8 @@ import io.kensu.dam.model.Process;
 public class KensuAgent {
     private static final Logger LOGGER = LoggerFactory.getLogger(KensuAgent.class);
     
+    public static String PROPERTIES_FILE = "/kensu.properties";
+
     public String serverHost;
 
     public AirbyteSource source;
@@ -70,26 +74,50 @@ public class KensuAgent {
     public CodeBase codeBase;
     public CodeVersion codeVersion;
 
-    public ManageKensuDamEntitiesApi api;
+    public ManageKensuDamEntitiesApi observationsAPI;
+    public Properties configuration = new Properties();
 
     public KensuAgent(AirbyteSource source, AirbyteDestination destination, AirbyteMapper mapper,
             MessageTracker messageTracker, RecordSchemaValidator recordSchemaValidator,
             WorkerMetricReporter metricReporter) {
 
-        String apiHost = System.getenv("DAM_INGESTION_URL"); // TODO => CONF
-        String authToken = System.getenv("AUTH_TOKEN"); // TODO => how to have a token per process?
+        InputStream resourceStream = getClass().getResourceAsStream(PROPERTIES_FILE);
+        if (resourceStream != null) {
+            try {
+                configuration.load(resourceStream);
+            } catch (IOException e) {
+                LOGGER.error("Cannot load properties file: " + PROPERTIES_FILE, e);
+                configuration = null;
+            }
+        } else {
+            LOGGER.error("Cannot access properties file: " + PROPERTIES_FILE);
+            configuration = null;
+        }
 
         ApiClient apiClient = null;
-        if (System.getenv("KENSU_ONLINE") != null) {
+        if (configuration == null || (configuration.getProperty("kensu.offline.enabled") != null && 
+                                        Boolean.parseBoolean(configuration.getProperty("kensu.offline.enabled")))) {
+            LOGGER.info("Using offline mode for observations");
+            // file path to store observations
+            String filePath = (configuration==null)?null:configuration.getProperty("kensu.offline.file");
+            // Offline client
+            apiClient = new OfflineFileApiClient(filePath);
+        } else {
+            LOGGER.info("Using online mode for observations");
+            String apiHost = configuration.getProperty("kensu.api");
+            String authToken = configuration.getProperty("kensu.auth_token"); // TODO => how to have a token per process?
             // Online
             apiClient = new ApiClient()
                     .setBasePath(apiHost)
                     .addDefaultHeader("X-Auth-Token", authToken);
-        } else {
-            // Offline client
-            apiClient = new OfflineFileApiClient();
         }
-        this.api = new ManageKensuDamEntitiesApi(apiClient);        
+        this.observationsAPI = new ManageKensuDamEntitiesApi(apiClient);
+        // ensuring the default PhysicalLocation is reported (needed for DataSources)
+        try {
+            this.observationsAPI.reportPhysicalLocation(UNKNOWN_PL);
+        } catch (ApiException e) {
+            LOGGER.error("Cannot report physical location", e);
+        }
 
         this.source = source;
         if (source == null) {
@@ -135,9 +163,18 @@ public class KensuAgent {
                                                 .launchedByUserRef(new UserRef().byPK(launchingUser.getPk()))
                                                 .executedCodeVersionRef(new CodeVersionRef().byPK(this.codeVersion.getPk()))
                                                 .environment("Provided by Airbyte?"); //TODO      
-            // TODO send      
+            // sending observations   
+            try {
+                observationsAPI.reportProcess(process);
+                observationsAPI.reportProject(project);
+                observationsAPI.reportUser(launchingUser);
+                observationsAPI.reportCodeBase(codeBase);
+                observationsAPI.reportUser(maintainerUser);
+                observationsAPI.reportCodeVersion(codeVersion);
+            } catch (ApiException e) {
+                LOGGER.error("Cannot send process, project, user, codeBase, and/or codeVersion", e);
+            }
         }
-
     }
     
     private static <R> R getPrivateField(Class cl, String fieldName, Object o) {
@@ -238,7 +275,14 @@ public class KensuAgent {
         }
 
         // INFO => the destination of the destination is not known -> so we copy the source
-        // TODO send sourceDS, sourceSC, destinationDS
+        // sending sourceDS, sourceSC, destinationDS
+        try {
+            this.observationsAPI.reportDataSource(sourceDS);
+            this.observationsAPI.reportSchema(sourceSC);
+            this.observationsAPI.reportDataSource(destinationDS);            
+        } catch (ApiException e) {
+            LOGGER.error("Cannot report datasource and schema", e);
+        }
     }
 
     public void handleMessageMapped(AirbyteMessage message) {
@@ -290,7 +334,13 @@ public class KensuAgent {
             lineageRun = new LineageRun().pk(new LineageRunPK()
                                                 .processRunRef(new ProcessRunRef().byPK(this.processRun.getPk()))
                                                 .lineageRef(new ProcessLineageRef().byPK(this.lineage.getPk())));
-            // TODO send lineage and run
+            // send lineage and run
+            try {
+                this.observationsAPI.reportProcessLineage(lineage);
+                this.observationsAPI.reportLineageRun(lineageRun);
+            } catch (ApiException e) {
+                LOGGER.error("Cannot report lineage, lineageRun", e);
+            }
         } else {
             LOGGER.warn("Process mapped message skipped as Destination schema is null, see logs from `init`");
         }
@@ -378,9 +428,16 @@ public class KensuAgent {
                                                         e->e.getKey(), e->BigDecimal.valueOf(e.getValue())
                                                     )));
         
-        // TODO send
+        // sending stats
+        try {
+            this.observationsAPI.reportDataStats(sourceDSMetrics);
+            this.observationsAPI.reportDataStats(destinationDSMetrics);
+        } catch (ApiException e) {
+            LOGGER.error("Cannot report datastats", e);
+        }
 
-        // TODO notify agent is done => clear cache in Factory
+        // notify agent is done => clear cache in Factory
+        KensuAgentFactory.terminate(this);
     }
 
     private static PhysicalLocation UNKNOWN_PL = new PhysicalLocation()
