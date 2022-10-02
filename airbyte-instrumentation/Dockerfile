@@ -16,7 +16,7 @@ RUN sed -i 's|^CLASSPATH=|CLASSPATH=/app/airbyte-agent.jar:|g' /app/airbyte-work
 
 # Add the following to enter in debug mode
 # -agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=*:9044
-ENV JAVA_OPTS -javaagent:/app/airbyte-instrumentation.jar 
+ENV JAVA_OPTS -javaagent:/app/airbyte-instrumentation.jar -agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=*:9044
 EXPOSE 9044
 
 # wait for upstream dependencies to become available before starting server
