@@ -448,7 +448,7 @@ public class KensuAgent {
         Set<String> sourceFieldNames = sourceSC.getPk().getFields().stream().map(e -> e.getName()).collect(Collectors.toSet());
         SchemaRef sourceSCRef = new SchemaRef().byPK(this.sourceSC.getPk());
         SchemaRef destinationSCRef = new SchemaRef().byPK(this.destinationSC.getPk());
-        // INFO: Mapper is a black box... we can give it some extra power to also log its mapping, and retrieve it here, or in a span
+        // TODO: Mapper could be introspected to find the connection between names (normalization, ...)
         // So this best effort only link fields of same names
         Map<String, List<String>> bestEffortMapping = new HashMap<>();
         for (FieldDef fd : destinationSC.getPk().getFields()) {
