@@ -11,15 +11,9 @@ public class ClassWriterAirbyte extends ClassWriter {
 
     @Override
     protected String getCommonSuperClass(String type1, String type2) {
-        System.out.println("-------------------------------");
-        System.out.println("Type1 : " + type1);
-        System.out.println("Type2 : " + type2);
-        
         if (type1.equals("java/lang/Exception") && type2.equals("io/airbyte/workers/internal/AirbyteDestination")) {
-            System.out.println("Returning object");
             return "java/lang/Object";
         } else if (type1.equals("java/lang/Object") && type2.equals("io/airbyte/workers/internal/AirbyteDestination")) {
-            System.out.println("Returning object");
             return "java/lang/Object";
         }
         
