@@ -7,3 +7,4 @@
 airbyte-workers
 target/
 src/main/scripts/*.java
+dam-client-java
