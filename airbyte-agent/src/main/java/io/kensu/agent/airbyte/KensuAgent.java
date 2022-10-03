@@ -1,33 +1,27 @@
 package io.kensu.agent.airbyte;
 
-import java.util.Iterator;
-import java.util.List;
+import java.io.IOException;
+import java.io.InputStream;
+import java.lang.reflect.Field;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.Map;
+import java.util.Iterator;
 import java.util.Optional;
+import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
-import java.util.function.Consumer;
-import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.lang.reflect.Field;
-import java.math.BigDecimal;
-import java.nio.file.Path;
-
 import com.fasterxml.jackson.databind.JsonNode;
 
-import io.airbyte.commons.text.Names;
 import io.airbyte.config.StandardSyncInput;
 import io.airbyte.protocol.models.AirbyteMessage;
 import io.airbyte.protocol.models.AirbyteRecordMessage;
-import io.airbyte.protocol.models.ConfiguredAirbyteStream;
 import io.airbyte.workers.internal.AirbyteSource;
 import io.airbyte.workers.internal.DefaultAirbyteSource;
 import io.airbyte.workers.internal.AirbyteDestination;
@@ -42,7 +36,6 @@ import io.airbyte.workers.WorkerMetricReporter;
 import io.kensu.dam.*;
 import io.kensu.dam.model.*;
 import io.kensu.dam.model.Process;
-import io.kensu.dam.util.Compact;
 
 public class KensuAgent {
     private static final Logger LOGGER = LoggerFactory.getLogger(KensuAgent.class);
@@ -222,16 +215,12 @@ public class KensuAgent {
         }
     }
 
-    private Map.Entry<Predicate<String>, Consumer<StandardSyncInput>> createProcessEntry(String matchStart, Consumer<StandardSyncInput> process) {
-        return Map.<Predicate<String>, Consumer<StandardSyncInput>>entry((image) -> image.startsWith(matchStart), process);
-    }
-
     // TODO could be filled reading the specs YAML
-    public Map<Predicate<String>, Consumer<StandardSyncInput>> sources = Map.ofEntries(
-        createProcessEntry("airbyte/source-file", (syncInput) -> this.processAirbyteSourceFile(syncInput))
+    public List<KensuProcessor> sources = List.of(
+        new Sources.AirbyteSourceFile()
     );
-    public Map<Predicate, Consumer<StandardSyncInput>> destinations = Map.ofEntries(
-        createProcessEntry("airbyte/destination-csv", (syncInput) -> this.processAirbyteDestinationCsv(syncInput))
+    public List<KensuProcessor> destinations = List.of(
+        new Destinations.AirbyteSourceFile()
     );
 
     public void init(StandardSyncInput syncInput) {
@@ -239,11 +228,9 @@ public class KensuAgent {
             LOGGER.error("Cannot proceed as source image name is unknown");
             return;
         } else {
-            Optional<Consumer<StandardSyncInput>> sourceProcessor = sources.entrySet().stream().filter(e->e.getKey().test(sourceImage))
-                                                                                                    .map(e->e.getValue())
-                                                                                                    .findFirst();
+            Optional<KensuProcessor> sourceProcessor = sources.stream().filter(s->s.matches(sourceImage)).findFirst();
             if (sourceProcessor.isPresent()) {
-                sourceProcessor.get().accept(syncInput);
+                sourceProcessor.get().process(syncInput, this);
             } else {
                 LOGGER.error("Cannot handle source image: " + sourceImage);
             }
@@ -252,82 +239,13 @@ public class KensuAgent {
             LOGGER.error("Cannot proceed as destination image name is unknown");
             return;
         } else {
-            Optional<Consumer<StandardSyncInput>> destinationProcessor = destinations.entrySet().stream().filter(e->e.getKey().test(destinationImage))
-                                                                                                        .map(e->e.getValue())
-                                                                                                        .findFirst();
+            Optional<KensuProcessor> destinationProcessor = destinations.stream().filter(e->e.matches(destinationImage)).findFirst();
             if (destinationProcessor.isPresent()) {
-                destinationProcessor.get().accept(syncInput);
+                destinationProcessor.get().process(syncInput, this);
             } else {
                 LOGGER.error("Cannot handle destination image: " + destinationImage);
             }
         }
-    }
-
-    // SOURCE PROCESSORS
-    private void processAirbyteSourceFile(StandardSyncInput syncInput) {
-        // configured source for the sync
-        JsonNode sourceConfiguration = syncInput.getSourceConfiguration();
-        // "https://www.donneesquebec.ca/recherche/fr/dataset/857d007a-f195-434b-bc00-7012a6244a90/resource/16f55019-f05d-4375-a064-b75bce60543d/download/pf-mun-2019-2019.csv"
-        String url = sourceConfiguration.get("url").textValue();
-        // "csv"
-        String format = sourceConfiguration.get("format").textValue();
-        // "HTTPS"
-        String providerStorage = sourceConfiguration.get("provider").get("storage").textValue();
-        // "donneesquebec"
-        String datasetName = sourceConfiguration.get("dataset_name").textValue();
-
-        sourceDS = new DataSource()
-                .name(datasetName)
-                .format(format)
-                .pk(new DataSourcePK()
-                        .location(url)
-                        .physicalLocationRef(UNKNOWN_PL_REF));
-
-        // validator => get schema => configured
-        if (recordSchemaValidatorStreams != null) {
-            SchemaPK pk = new SchemaPK().dataSourceRef(new DataSourceRef().byPK(this.sourceDS.getPk()));
-            JsonNode sourceJsonSchema = recordSchemaValidatorStreams.get(datasetName);
-            // properties: {"field1": {"type": ["string", "null"]}, ...}
-            // properties.fields: Iterator<Map.Entry<String,JsonNode>>
-            Iterator<Map.Entry<String, JsonNode>> itFields = sourceJsonSchema.get("properties").fields();
-            while (itFields.hasNext()) {
-                Map.Entry<String, JsonNode> field = itFields.next();
-                String fieldName = field.getKey();
-                String fieldType = field.getValue().get("type").elements().next().textValue();
-                // TODO better typing => we get `number` and `string`
-                Boolean fieldNullable = true; // TODO... no idea?
-                pk = pk.addFieldsItem(new FieldDef().name(fieldName).fieldType(fieldType).nullable(fieldNullable));
-            }
-            sourceSC = new Schema().name(datasetName).pk(pk);
-        } else {
-            LOGGER.warn("No schema validator available, so no schema available for source: " + source);
-        }
-    }
-
-    // DESTINATION PROCESSORS
-    private void processAirbyteDestinationCsv(StandardSyncInput syncInput) {
-        // configured destination for the sync
-        JsonNode destinationConfiguration = syncInput.getDestinationConfiguration();
-        //"/tmp"
-        String destinationPath = destinationConfiguration.get("destination_path").textValue();
-        // FIXME => always only 1?
-        ConfiguredAirbyteStream stream = syncInput.getCatalog().getStreams().get(0);
-        String streamName = stream.getStream().getName();
-        // shame... copied from the Destination's code. This could be available somewhere else, or differently 
-        String fileName = Names.toAlphanumericAndUnderscore("_airbyte_raw_" + streamName);
-        String rootPathForDestinationCsv = System.getenv("LOCAL_ROOT");
-        if (rootPathForDestinationCsv == null) {
-            // default...
-            rootPathForDestinationCsv = "/tmp/airbyte_local";
-        }
-        String fileLocation = rootPathForDestinationCsv + "/" + destinationPath + "/" + fileName;
-        destinationDS = new DataSource()
-                            .name(fileName)
-                            .format("csv")
-                            .pk(new DataSourcePK()
-                                .location(fileLocation) 
-                                .physicalLocationRef(UNKNOWN_PL_REF));
-        destinationSC = new Schema().name(destinationDS.getName()).pk(new SchemaPK().dataSourceRef(new DataSourceRef().byPK(this.destinationDS.getPk())));
     }
 
     // Message HANDLERS (read, map, write)
@@ -502,10 +420,10 @@ public class KensuAgent {
         KensuAgentFactory.terminate(this);
     }
 
-    private static PhysicalLocation UNKNOWN_PL = new PhysicalLocation()
+    public static PhysicalLocation UNKNOWN_PL = new PhysicalLocation()
                                                 .name("Unknown")
                                                 .lat(0.12341234)
                                                 .lon(0.12341234)
                                                 .pk(new PhysicalLocationPK().country("Unknown").city("Unknown"));
-    private static PhysicalLocationRef UNKNOWN_PL_REF = new PhysicalLocationRef().byPK(UNKNOWN_PL.getPk());
+    public static PhysicalLocationRef UNKNOWN_PL_REF = new PhysicalLocationRef().byPK(UNKNOWN_PL.getPk());
 }
