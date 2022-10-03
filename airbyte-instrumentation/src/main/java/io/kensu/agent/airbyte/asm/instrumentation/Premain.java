@@ -36,14 +36,8 @@ public class Premain {
                             cr.accept(cv, ClassReader.EXPAND_FRAMES);
                         // Return the injected code to replace the original class
                         byte[] bw = cw.toByteArray();
-                        System.out.println("Initial byte length: " + b.length);
-                        System.out.println("Modified byte length: " + bw.length);
-                        if (b.length == bw.length) {
-                            System.out.println("Weird, byte array of same size");
-                        }
                         return bw;
                     } catch (Exception e) {
-                        System.out.println("ERROR... : " + e.getMessage());
                         e.printStackTrace();
                         throw e;
                     }

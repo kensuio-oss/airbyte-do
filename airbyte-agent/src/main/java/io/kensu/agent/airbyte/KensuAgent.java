@@ -160,17 +160,17 @@ public class KensuAgent {
             // A process is currently representing the link between a Source type (docker) and destination type (docker)
             // TODO => should it be coming from the syncInput.catalog.streams?
             this.process = new Process().pk(new ProcessPK().qualifiedName("Airbyte:" + sourceImage + "->"+ destinationImage));
-            this.project = new Project().pk(new ProjectPK().name("Provided By Airbyte?")); //TODO
-            this.launchingUser = new User().pk(new UserPK().name("Provided by Airbyte?")); //TODO
-            this.codeBase = new CodeBase().pk(new CodeBasePK().location("Provided by Airbyte?"));  //TODO
-            this.maintainerUser = new User().pk(new UserPK().name("Provided by Airbyte?")); //TODO
-            this.codeVersion = new CodeVersion().pk(new CodeVersionPK().version("Provided by Airbyte?")
+            this.project = new Project().pk(new ProjectPK().name("Airbyte")); //TODO Provided By Airbyte?
+            this.launchingUser = new User().pk(new UserPK().name("AirbyteLauncher")); //TODO Provided by Airbyte?
+            this.codeBase = new CodeBase().pk(new CodeBasePK().location("AirbyteCodeBase"));  //TODO Provided by Airbyte?
+            this.maintainerUser = new User().pk(new UserPK().name("AirbyteMaintainer")); //TODO Provided by Airbyte?
+            this.codeVersion = new CodeVersion().pk(new CodeVersionPK().version("AirbyteCodeVersion") // TODO Provided by Airbyte?
                                                                         .codebaseRef(new CodeBaseRef().byPK(this.codeBase.getPk())))
                                                 .maintainersRefs(new ArrayList<>(List.of(new UserRef().byPK(this.maintainerUser.getPk()))));
             this.processRun = new ProcessRun().projectsRefs(new ArrayList<>(List.of(new ProjectRef().byPK(this.project.getPk())))) 
                                                 .launchedByUserRef(new UserRef().byPK(launchingUser.getPk()))
                                                 .executedCodeVersionRef(new CodeVersionRef().byPK(this.codeVersion.getPk()))
-                                                .environment("Provided by Airbyte?") //TODO
+                                                .environment("Production") //TODO Provided by Airbyte?
                                                 .pk(new ProcessRunPK().qualifiedName(process.getPk().getQualifiedName())
                                                                         .processRef(new ProcessRef().byPK(process.getPk()))); 
             // sending observations   
@@ -181,6 +181,7 @@ public class KensuAgent {
                 observationsAPI.reportCodeBase(codeBase);
                 observationsAPI.reportUser(maintainerUser);
                 observationsAPI.reportCodeVersion(codeVersion);
+                observationsAPI.reportProcessRun(processRun);
             } catch (ApiException e) {
                 LOGGER.error("Cannot send process, project, user, codeBase, and/or codeVersion", e);
             }
