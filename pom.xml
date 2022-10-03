@@ -14,7 +14,7 @@
   <properties>
     <asm.version>9.3</asm.version>
     <airbyte.version>0.40.4</airbyte.version>
-    <jackson.version>2.13.0</jackson.version>
+    <jackson.version>2.13.2.1</jackson.version>
     <slf4j.version>1.7.30</slf4j.version>
   </properties>
 
