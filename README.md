@@ -27,6 +27,7 @@ Version: `0.40.4`.
 
 ### Destinations
 - `airbyte/destination-csv`: `0.2.10`
+- `airbyte/destination-bigquery`: `1.1.16`. **Limitation: table name not used, but dataset name in Airbyte**
 
 ## Requirements
 
@@ -71,6 +72,7 @@ This file contains several variable that will be loaded by the `KensuAgent`:
 First make sure, you are in the `airbyte-do` folder you have cloned, then execute:
 
 ```sh
+sdk use java 18.0.2.1-tem
 mvn clean install && docker build -t kensuio/airbyte-worker -f airbyte-instrumentation/Dockerfile .
 ```
 
@@ -105,6 +107,10 @@ Then run
 ```sh
 docker-compose up
 ```
+
+Go to [localhost:8000](localhost:8000).
+
+> ⚠️ At first connection, by default, use `airbyte`:`password` to connect (basic auth)
 
 ## Test
 

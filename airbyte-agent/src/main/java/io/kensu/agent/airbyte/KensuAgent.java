@@ -5,6 +5,8 @@ import java.io.InputStream;
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Optional;
@@ -220,7 +222,8 @@ public class KensuAgent {
         new Sources.AirbyteSourceFile()
     );
     public List<KensuProcessor> destinations = List.of(
-        new Destinations.AirbyteSourceFile()
+        new Destinations.AirbyteDestinationCSV(),
+        new Destinations.AirbyteDestinationBigQuery()
     );
 
     public void init(StandardSyncInput syncInput) {
@@ -320,10 +323,16 @@ public class KensuAgent {
             String fieldName = field.getKey();
             JsonNode fieldValue = field.getValue();
             String fieldType = null;
+            // TODO Date, ...
             if (fieldValue.isNumber()) {
                 fieldType = "number";
             } else if (fieldValue.isTextual()) {
                 fieldType = "string";
+            } else if (fieldValue.isBoolean()) {
+                fieldType = "boolean";
+            } else if (fieldValue.isNull()) {
+                fieldType = null;
+                LOGGER.debug("TODO handle null values for field: " + fieldName);
             } else {
                 LOGGER.debug("Not handled copied message field type to accumulate metrics: " + fieldValue.getNodeType());
             }
@@ -335,31 +344,66 @@ public class KensuAgent {
     }
 
     public void updateMetrics(Map<String, Double> metrics, String fieldName, String fieldType, JsonNode value) {
-        // TODO handle more types
-        if (fieldType.equals("number")) {
+        if (value != null) {
+            if (value.isNull()) { // probably not gonna be here
+                value = null;
+            }
+        } 
+        if (value == null) {
+            // count.null
+            metrics.compute(fieldName+".nullrows", (k, v) -> (v==null)?1:v+1);
+        } else {
             // count
             metrics.compute(fieldName+".count", (k, v) -> (v==null)?1:v+1);
-            // sum
-            metrics.compute(fieldName+".sum", (k, v) -> (v==null)?1:v+value.numberValue().doubleValue()); // TODO... doubleValue always :-/
-        } else if (fieldType.equals("string")) {
-            // count
-            metrics.compute(fieldName+".count", (k, v) -> (v==null)?1:v+1);
-            // total length
-            metrics.compute(fieldName+".sum", (k, v) -> (v==null)?1:v+value.textValue().length());
-            // distinct 
-            // TODO use CMS?
+            if (fieldType.equals("number")) {
+                final double doubleValue = value.numberValue().doubleValue();
+                // sum
+                metrics.compute(fieldName+".sum", (k, v) -> ((v==null)?0:v)+doubleValue); // TODO... doubleValue always :-/
+            } else if (fieldType.equals("string")) {
+                final String stringValue = value.textValue();
+                // total length
+                metrics.compute(fieldName+".sum", (k, v) -> ((v==null)?0:v)+stringValue.length());
+                // distinct 
+                // TODO use CMS?
+                // categories hist
+                // TODO 
+            } else if (fieldType.equals("boolean")) {
+                final boolean boolValue = value.booleanValue();
+                // true/false counts
+                metrics.compute(fieldName+(boolValue?".true":".false"), (k, v) -> (v==null)?1:v+1);
+            }
         }
     }
 
     public void finishCopy() {
         // sending sourceDS, sourceSC, destinationDS
+        List<String> missingObjects = new ArrayList<>();
         try {
-            this.observationsAPI.reportDataSource(sourceDS);
-            this.observationsAPI.reportSchema(sourceSC);
-            this.observationsAPI.reportDataSource(destinationDS);
-            this.observationsAPI.reportSchema(destinationSC);
+            if (sourceDS != null) {
+                this.observationsAPI.reportDataSource(sourceDS);
+                if (sourceSC != null)
+                    this.observationsAPI.reportSchema(sourceSC);
+                else 
+                    missingObjects.add("Source Schema");
+            } else 
+                missingObjects.add("Source DataSource");
+            if (destinationDS != null) {
+                this.observationsAPI.reportDataSource(destinationDS);
+                if (destinationSC != null)
+                    this.observationsAPI.reportSchema(destinationSC);
+                else 
+                    missingObjects.add("Destination Schema");
+            } else 
+                missingObjects.add("Destination DataSource");
         } catch (ApiException e) {
             LOGGER.error("Cannot report datasource and schema", e);
+        }
+
+        if (!missingObjects.isEmpty()) {
+            LOGGER.warn("Skipping the `finishCopy` without computing lineage as some objects are missing: " + Arrays.toString(missingObjects.toArray()));
+            // WARN... early stop here
+            KensuAgentFactory.terminate(this);
+            return;
         }
 
         // compute final lineage using final schemas
