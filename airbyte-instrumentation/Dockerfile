@@ -9,10 +9,12 @@ WORKDIR /app
 # copy instrumentation to /app
 ADD airbyte-instrumentation/target/airbyte-instrumentation.jar /app
 
+RUN mkdir /kensu
+
 # copy agent lib to /app
 ADD airbyte-agent/target/airbyte-agent.jar /app
 # Prepend the agent jar to the existing classpath def (there is no other way to extend it)
-RUN sed -i 's|^CLASSPATH=|CLASSPATH=/app/airbyte-agent.jar:|g' /app/airbyte-workers-0.40.4/bin/airbyte-workers 
+RUN sed -i 's|^CLASSPATH=|CLASSPATH=/app/airbyte-agent.jar:/kensu:|g' /app/airbyte-workers-0.40.4/bin/airbyte-workers 
 
 # Add the following 2 lines  to enter in debug mode
 # In JAVA_OPTS => -agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=*:9044

@@ -68,16 +68,23 @@ public class KensuAgent {
     public RecordSchemaValidator recordSchemaValidator;
     public Map<String, JsonNode> recordSchemaValidatorStreams;
 
+    private String projectName;
     public Project project;
     public Process process;
     public ProcessRun processRun;
+    private String userName;
     public User launchingUser;
+    private String maintainerName;
     public User maintainerUser;
+    private String codeBaseLocation;
     public CodeBase codeBase;
+    private String codeVersionVersion;
     public CodeVersion codeVersion;
+    private String environment;
 
     public ManageKensuDamEntitiesApi observationsAPI;
     public Properties configuration = new Properties();
+
 
     public KensuAgent(AirbyteSource source, AirbyteDestination destination, AirbyteMapper mapper,
             MessageTracker messageTracker, RecordSchemaValidator recordSchemaValidator,
@@ -150,28 +157,67 @@ public class KensuAgent {
             this.recordSchemaValidatorStreams = KensuAgent.<Map<String, JsonNode>>getPrivateField(RecordSchemaValidator.class, "streams", recordSchemaValidator);
         }
 
+        this.projectName = configuration.getProperty("kensu.project.name");
+        if (this.projectName == null || this.projectName.trim().length() == 0) {
+            LOGGER.warn("No project name configured, fallback on default");
+            //TODO Provided By Airbyte?
+            this.projectName = "Airbyte";
+        }
+        this.userName = configuration.getProperty("kensu.user.name");
+        if (this.userName == null || this.userName.trim().length() == 0) {
+            LOGGER.warn("No user name configured, fallback on default if no var env");
+            //TODO Provided By Airbyte?
+            this.userName = System.getenv().getOrDefault("USER", "Airbyte");
+        }
+        this.codeBaseLocation = configuration.getProperty("kensu.codebase.location");
+        if (this.codeBaseLocation == null || this.codeBaseLocation.trim().length() == 0) {
+            LOGGER.warn("No code base location configured, fallback on default");
+            //TODO Provided By Airbyte?
+            this.codeBaseLocation = "AirbyteCodeBase";
+        }
+        this.codeVersionVersion = configuration.getProperty("kensu.codeversion.version"); 
+        if (this.codeVersionVersion == null || this.codeVersionVersion.trim().length() == 0) {
+            LOGGER.warn("No code version configured, fallback on default");
+            // TODO could be a version of a connection?
+            this.codeVersionVersion = "AirbyteVersion";
+        }
+        this.maintainerName = configuration.getProperty("kensu.maintainer.name");
+        if (this.maintainerName == null || this.maintainerName.trim().length() == 0) {
+            LOGGER.warn("No maintainer name configured, fallback on default on user name");
+            //TODO Provided By Airbyte?
+            this.maintainerName = this.userName;
+        }
+        this.environment = configuration.getProperty("kensu.environment");
+        if (this.environment == null || this.environment.trim().length() == 0) {
+            LOGGER.warn("No environment configured, fallback on default");
+            //TODO Provided By Airbyte?
+            this.environment = "lab";
+        }
+
         if (sourceImage != null && destinationImage != null) {
             // We make the choice that each sync is a process, not the Airbyte Server
             // A process is currently representing the link between a Source type (docker) and destination type (docker)
             // TODO => should it be coming from the syncInput.catalog.streams?
-            this.process = new Process().pk(new ProcessPK().qualifiedName("Airbyte:" + sourceImage + "->"+ destinationImage));
-            this.project = new Project().pk(new ProjectPK().name("Airbyte")); //TODO Provided By Airbyte?
-            this.launchingUser = new User().pk(new UserPK().name("AirbyteLauncher")); //TODO Provided by Airbyte?
-            this.codeBase = new CodeBase().pk(new CodeBasePK().location("AirbyteCodeBase"));  //TODO Provided by Airbyte?
-            this.maintainerUser = new User().pk(new UserPK().name("AirbyteMaintainer")); //TODO Provided by Airbyte?
-            this.codeVersion = new CodeVersion().pk(new CodeVersionPK().version("AirbyteCodeVersion") // TODO Provided by Airbyte?
+            // TODO should be using more information about the datasources!
+            this.process = new Process().pk(new ProcessPK().qualifiedName("Airbyte connection:" + sourceImage + "->"+ destinationImage)); 
+
+            this.project = new Project().pk(new ProjectPK().name(this.projectName));
+            this.launchingUser = new User().pk(new UserPK().name(this.userName));
+            this.codeBase = new CodeBase().pk(new CodeBasePK().location(this.codeBaseLocation));
+            this.maintainerUser = new User().pk(new UserPK().name(this.maintainerName));
+            this.codeVersion = new CodeVersion().pk(new CodeVersionPK().version(this.codeVersionVersion)
                                                                         .codebaseRef(new CodeBaseRef().byPK(this.codeBase.getPk())))
                                                 .maintainersRefs(new ArrayList<>(List.of(new UserRef().byPK(this.maintainerUser.getPk()))));
             this.processRun = new ProcessRun().projectsRefs(new ArrayList<>(List.of(new ProjectRef().byPK(this.project.getPk())))) 
                                                 .launchedByUserRef(new UserRef().byPK(launchingUser.getPk()))
                                                 .executedCodeVersionRef(new CodeVersionRef().byPK(this.codeVersion.getPk()))
-                                                .environment("Production") //TODO Provided by Airbyte?
+                                                .environment(this.environment)
                                                 .pk(new ProcessRunPK().qualifiedName(process.getPk().getQualifiedName())
                                                                         .processRef(new ProcessRef().byPK(process.getPk()))); 
             // sending observations   
             try {
-                observationsAPI.reportProcess(process);
                 observationsAPI.reportProject(project);
+                observationsAPI.reportProcess(process);
                 observationsAPI.reportUser(launchingUser);
                 observationsAPI.reportCodeBase(codeBase);
                 observationsAPI.reportUser(maintainerUser);

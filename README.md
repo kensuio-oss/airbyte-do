@@ -95,7 +95,11 @@ git clone git@github.com:airbytehq/airbyte.git
 cd airbyte
 ```
 
-Then update the `docker-compose.yaml`, locating `image: airbyte/worker:${VERSION}` and change it in `kensuio/airbyte-worker:latest`
+Then update the `docker-compose.yaml`, with 
+- locate `image: airbyte/worker:${VERSION}` and change it in `kensuio/airbyte-worker:latest`
+- in this service: add volume entry `      - /tmp/airbyte-kensu:/kensu`
+- create kensu.properties file `cp ../airbyte-do/airbyte-agent/target/classes/kensu.properties.template /tmp/kensu/kensu.properties`
+- configure `/tmp/kensu/kensu.properties` with token, project name, etc
 
 > NOTE: if you want to active the java debug (for developers), then add after `environment`
 > ```yaml
