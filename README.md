@@ -97,7 +97,7 @@ cd airbyte
 
 Then update the `docker-compose.yaml`, with 
 - locate `image: airbyte/worker:${VERSION}` and change it in `kensuio/airbyte-worker:latest`
-- in this service: add volume entry `      - /tmp/airbyte-kensu:/kensu`
+- in this service: add volume entry `      - ./tmp/kensu:/kensu`
 - create kensu.properties file `cp ../airbyte-do/airbyte-agent/target/classes/kensu.properties.template /tmp/kensu/kensu.properties`
 - configure `/tmp/kensu/kensu.properties` with token, project name, etc
 
